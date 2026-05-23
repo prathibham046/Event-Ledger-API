@@ -31,6 +31,26 @@ mvn spring-boot:run
 
 The API will be available at `http://127.0.0.1:8080`.
 
+## Run with Docker
+
+Build the image:
+
+```bash
+docker build -t event-ledger-api .
+```
+
+Run the container:
+
+```bash
+docker run --rm -p 8080:8080 event-ledger-api
+```
+
+Or use Docker Compose:
+
+```bash
+docker compose up --build
+```
+
 ## Run tests
 
 ```bash
