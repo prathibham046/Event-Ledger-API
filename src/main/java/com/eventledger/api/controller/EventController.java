@@ -38,8 +38,12 @@ public class EventController {
     }
 
     @GetMapping("/events")
-    public List<EventResponse> listEvents(@RequestParam("account") String accountId) {
-        return eventService.listEvents(accountId);
+    public List<EventResponse> listEvents(
+            @RequestParam("account") String accountId,
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size
+    ) {
+        return eventService.listEvents(accountId, page, size);
     }
 
     @GetMapping("/accounts/{accountId}/balance")

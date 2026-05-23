@@ -4,22 +4,37 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
 class EventLedgerApiApplicationTests {
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private TestRestTemplate restTemplate;
 
     @Test
     void createEventAndRetrieveIt() throws Exception {
@@ -105,6 +120,87 @@ class EventLedgerApiApplicationTests {
         mockMvc.perform(get("/accounts/acct-456/balance"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.balance").value(250.0));
+    }
+
+    @Test
+    void listEventsSupportsPagination() throws Exception {
+        for (int i = 1; i <= 5; i++) {
+            String event = "{" +
+                    "\"eventId\": \"evt-pag-" + i + "\"," +
+                    "\"accountId\": \"acct-pag\"," +
+                    "\"type\": \"CREDIT\"," +
+                    "\"amount\": " + (10 * i) + "," +
+                    "\"currency\": \"USD\"," +
+                    "\"eventTimestamp\": \"2026-05-15T14:0" + i + ":00Z\"" +
+                    "}";
+            mockMvc.perform(post("/events").contentType(MediaType.APPLICATION_JSON).content(event))
+                    .andExpect(status().isCreated());
+        }
+
+        mockMvc.perform(get("/events")
+                        .param("account", "acct-pag")
+                        .param("page", "0")
+                        .param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].eventId").value("evt-pag-1"))
+                .andExpect(jsonPath("$[1].eventId").value("evt-pag-2"));
+
+        mockMvc.perform(get("/events")
+                        .param("account", "acct-pag")
+                        .param("page", "1")
+                        .param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].eventId").value("evt-pag-3"))
+                .andExpect(jsonPath("$[1].eventId").value("evt-pag-4"));
+    }
+
+    @Test
+    void concurrentDuplicateEventSubmissionsAreHandledGracefully() throws Exception {
+        String payload = "{" +
+                "\"eventId\": \"evt-concurrent\"," +
+                "\"accountId\": \"acct-concurrent\"," +
+                "\"type\": \"CREDIT\"," +
+                "\"amount\": 100.0," +
+                "\"currency\": \"USD\"," +
+                "\"eventTimestamp\": \"2026-05-15T14:00:00Z\"" +
+                "}";
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ConcurrentLinkedQueue<Integer> statuses = new ConcurrentLinkedQueue<>();
+        ConcurrentLinkedQueue<String> bodies = new ConcurrentLinkedQueue<>();
+        ConcurrentLinkedQueue<Exception> exceptions = new ConcurrentLinkedQueue<>();
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(payload, headers);
+
+        for (int i = 0; i < 2; i++) {
+            executor.submit(() -> {
+                try {
+                    ready.countDown();
+                    start.await();
+                    ResponseEntity<String> response = restTemplate.postForEntity("/events", entity, String.class);
+                    statuses.add(response.getStatusCodeValue());
+                    bodies.add(response.getBody());
+                } catch (Exception e) {
+                    exceptions.add(e);
+                }
+            });
+        }
+
+        ready.await(5, TimeUnit.SECONDS);
+        start.countDown();
+        executor.shutdown();
+        assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        assertTrue(exceptions.isEmpty(), "No thread exceptions should occur");
+        assertTrue(statuses.contains(201));
+        assertTrue(statuses.contains(200));
+        assertEquals(2, bodies.size());
+        bodies.forEach(body -> assertTrue(body.contains("\"eventId\":\"evt-concurrent\"")));
     }
 
     @Test

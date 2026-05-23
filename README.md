@@ -6,7 +6,7 @@ A Java Spring Boot service for ingesting financial transaction events with idemp
 
 - `POST /events` to submit transaction events
 - `GET /events/{id}` to fetch a single event
-- `GET /events?account={accountId}` to list events for an account in timestamp order
+- `GET /events?account={accountId}` to list events for an account in timestamp order with optional `page` and `size`
 - `GET /accounts/{accountId}/balance` to compute current account balance
 - Embedded H2 in-memory database with idempotent event ingestion
 - Automated tests covering validation, duplicate submissions, ordering, and balance logic
@@ -41,4 +41,5 @@ mvn test
 
 - The app uses an embedded H2 database in memory for local execution.
 - Duplicate event submissions with the same `eventId` return the original event and do not modify balances.
+- Simultaneous `POST /events` with the same `eventId` are handled via the database primary-key constraint; one request succeeds and duplicates return the persisted event.
 - Event listings are sorted by `eventTimestamp` regardless of arrival order.

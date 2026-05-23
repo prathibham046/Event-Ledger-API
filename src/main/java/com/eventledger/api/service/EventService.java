@@ -6,6 +6,8 @@ import com.eventledger.api.dto.EventResponse;
 import com.eventledger.api.model.Event;
 import com.eventledger.api.repository.EventRepository;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -24,7 +26,6 @@ public class EventService {
         this.repository = repository;
     }
 
-    @Transactional
     public ResponseEntity<EventResponse> createEvent(EventRequest request) {
         Optional<Event> existing = repository.findById(request.getEventId());
         if (existing.isPresent()) {
@@ -42,7 +43,7 @@ public class EventService {
         );
 
         try {
-            Event saved = repository.save(event);
+            Event saved = repository.saveAndFlush(event);
             return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(saved));
         } catch (DataIntegrityViolationException duplicate) {
             Event saved = repository.findById(request.getEventId()).orElseThrow();
@@ -58,6 +59,14 @@ public class EventService {
 
     public List<EventResponse> listEvents(String accountId) {
         return repository.findByAccountIdOrderByEventTimestampAsc(accountId)
+                .stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<EventResponse> listEvents(String accountId, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        return repository.findByAccountIdOrderByEventTimestampAsc(accountId, pageable)
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
