@@ -1,0 +1,7 @@
+target/
+*.log
+*.db
+*.h2.db
+/.idea
+/.vscode
+**/target/
